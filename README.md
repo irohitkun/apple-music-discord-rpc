@@ -134,7 +134,7 @@ MIT
 
 ---
 
-##Credits
+## Credits
 
 This project was initiated and designed by Rohit (@irohitkun).
 
