@@ -10,7 +10,7 @@ Complete step-by-step instructions to get this running from scratch.
 - MacroDroid app ([Play Store](https://play.google.com/store/apps/details?id=com.arlosoft.macrodroid))
 - Termux app — **install from [F-Droid](https://f-droid.org/packages/com.termux/), NOT the Play Store** (Play Store version is outdated and breaks Node.js)
 - A Discord account
-- A Replit account (free tier works)
+- A Replit account (free tier works) **or** a VPS / home server (see [Self-Hosting](#self-hosting-vps--home-server))
 
 ---
 
@@ -36,6 +36,7 @@ The server self-pings `/api/healthz` every 4 minutes to stay alive on free tier.
 5. Upload a PNG of the Apple Music logo (white music note on red rounded-square background)
    - Name it exactly **`apple_music`** — lowercase, no spaces, no file extension in the name field
    - This is shown as the small icon when album art is displayed, and as the fallback large image
+   - Make sure the PNG has a **solid red (`#FC3C44`) background** — transparent PNGs are invisible on Discord's dark card
 6. Click **Save Changes**
 
 ---
@@ -57,7 +58,10 @@ The server self-pings `/api/healthz` every 4 minutes to stay alive on free tier.
 
 1. Open Discord desktop app
 2. Press `Ctrl+Shift+I` → Console tab
-3. Paste: `webpackChunkdiscord_app.push([[Math.random()],{},e=>{m=[];for(let c in e.c)m.push(e.c[c])}]);m.filter(m=>m?.exports?.default?.getToken).map(m=>m.exports.default.getToken())[0]`
+3. Paste:
+   ```js
+   webpackChunkdiscord_app.push([[Math.random()],{},e=>{m=[];for(let c in e.c)m.push(e.c[c])}]);m.filter(m=>m?.exports?.default?.getToken).map(m=>m.exports.default.getToken())[0]
+   ```
 
 ---
 
@@ -166,14 +170,255 @@ node ~/gateway.js &
 ```bash
 chmod +x ~/start-gateway.sh
 ```
-Then use MacroDroid → Termux:Task to trigger it on Apple Music notifications.
+Then use MacroDroid → Termux:Task to trigger `start-gateway.sh` on Apple Music notifications.
+
+---
+
+## Self-hosting (VPS / home server)
+
+If you'd rather not use Replit, you can run the API server yourself. The only hard requirement is a **stable public HTTPS URL** that MacroDroid can reach. Below is an honest breakdown of every viable option.
+
+---
+
+### Option A — VPS with a real domain (recommended)
+
+This is the most reliable setup. You rent a small server, point a domain at it, and get proper TLS via Let's Encrypt.
+
+**Minimum specs:** 512 MB RAM, 1 vCPU — any cheap VPS works (Hetzner CAX11 ~€4/mo, Oracle Always Free, Fly.io free tier, Railway, Render free tier).
+
+#### 1. Build and copy the server
+
+```bash
+# On your local machine / Replit shell
+pnpm --filter @workspace/api-server run build
+# Produces artifacts/api-server/dist/index.mjs
+```
+
+Copy `dist/` to your VPS:
+```bash
+scp -r artifacts/api-server/dist/ user@your-vps-ip:~/apple-music-rpc/
+scp artifacts/api-server/package.json user@your-vps-ip:~/apple-music-rpc/
+```
+
+#### 2. Install Node.js on the VPS (Ubuntu/Debian)
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
+cd ~/apple-music-rpc && npm install --omit=dev
+```
+
+#### 3. Create environment file
+
+```bash
+nano ~/apple-music-rpc/.env
+```
+```env
+PORT=3000
+API_KEY=your_api_key
+SESSION_SECRET=your_session_secret
+NODE_ENV=production
+```
+
+#### 4. Run it behind nginx + Let's Encrypt
+
+```bash
+sudo apt install -y nginx certbot python3-certbot-nginx
+
+# Get a free TLS cert (replace with your domain)
+sudo certbot --nginx -d api.yourdomain.com
+```
+
+`/etc/nginx/sites-available/apple-music-rpc`:
+```nginx
+server {
+    listen 443 ssl;
+    server_name api.yourdomain.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+```bash
+sudo ln -s /etc/nginx/sites-available/apple-music-rpc /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+#### 5. Keep it running with systemd
+
+`/etc/systemd/system/apple-music-rpc.service`:
+```ini
+[Unit]
+Description=Apple Music Discord RPC API
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/apple-music-rpc
+EnvironmentFile=/home/ubuntu/apple-music-rpc/.env
+ExecStart=/usr/bin/node dist/index.mjs
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now apple-music-rpc
+sudo systemctl status apple-music-rpc
+```
+
+Update `REPLIT_URL` in Termux `~/.env` to `https://api.yourdomain.com`.
+
+---
+
+### Option B — Docker (any VPS or home server)
+
+A `Dockerfile` is included in the repo root. Useful if you prefer containers.
+
+```bash
+# On your VPS
+git clone https://github.com/irohitkun/apple-music-discord-rpc.git
+cd apple-music-discord-rpc
+
+docker build -t apple-music-rpc .
+
+docker run -d \
+  --name apple-music-rpc \
+  --restart unless-stopped \
+  -p 3000:3000 \
+  -e API_KEY=your_api_key \
+  -e SESSION_SECRET=your_secret \
+  -e NODE_ENV=production \
+  -v $(pwd)/data:/app/data \
+  apple-music-rpc
+```
+
+Put nginx + Certbot in front of port 3000 the same way as Option A.
+
+---
+
+### Option C — Tunneling tools (ngrok, Cloudflare Tunnel, localtunnel)
+
+Tunneling tools expose a port on your **home machine or laptop** to the internet without needing a VPS or domain. They are quick to set up but come with real trade-offs.
+
+#### ngrok
+
+```bash
+# Install, then:
+ngrok http 3000
+# Gives you: https://abc123.ngrok-free.app
+```
+
+**Drawbacks:**
+- Free plan gives a **random URL that changes every restart** — you have to update MacroDroid every time
+- Free plan allows only **1 simultaneous connection** and has a request rate limit
+- ngrok servers are US/EU datacenters — adds latency if you're in Asia/India
+- ngrok can and does go down; your presence breaks with it
+- Paid plan (~$10/mo) gives a static domain but at that price a Hetzner VPS is cheaper and more reliable
+
+#### Cloudflare Tunnel (`cloudflared`)
+
+```bash
+cloudflared tunnel --url http://localhost:3000
+# Gives you: https://random-words.trycloudflare.com
+```
+
+**Drawbacks:**
+- The free quick-tunnel URL is also **random and ephemeral** — regenerates on restart
+- Named tunnels (stable URL) require a Cloudflare account and a domain you own — if you have that, Option A is just as easy
+- All traffic routes through Cloudflare's network — Cloudflare can inspect unencrypted payloads between their edge and your origin
+- Adds a hop compared to a direct VPS
+
+#### localtunnel
+
+```bash
+npx localtunnel --port 3000
+# Gives you: https://random-name.loca.lt
+```
+
+**Drawbacks:**
+- URL changes on every restart (same problem as ngrok free)
+- The service is community-maintained with **no SLA** — it goes down without warning for hours at a time
+- Frequently rate-limited; not suitable for a production webhook receiver
+- All traffic passes through a third-party server you have no control over
+
+#### serveo / bore.pub / similar
+
+Same category of drawbacks as localtunnel — ephemeral URLs, third-party infrastructure, reliability not guaranteed.
+
+---
+
+### Tunneling tools — when they actually make sense
+
+| Use case | Good choice |
+|----------|------------|
+| Quick local testing for 30 minutes | ngrok free / cloudflared quick tunnel |
+| Showing it to a friend once | Any tunnel |
+| Always-on production webhook | **Don't use tunnels** — use a VPS or Replit |
+| Home server you leave on 24/7 | Cloudflare Tunnel with a named tunnel + your own domain |
+
+**Bottom line:** if your MacBook is asleep, your tunnel is dead and your presence goes dark. For something that should work every time you play music, run it on a server that's always on.
+
+---
+
+### Option D — Home server (always-on PC / Raspberry Pi)
+
+If you have a machine that stays on 24/7, you can run the server there and expose it with a Cloudflare named tunnel (no open ports on your router needed).
+
+```bash
+# Install cloudflared and log in
+cloudflared tunnel login
+cloudflared tunnel create apple-music-rpc
+
+# Create config at ~/.cloudflared/config.yml
+tunnel: <tunnel-id>
+credentials-file: /home/user/.cloudflared/<tunnel-id>.json
+
+ingress:
+  - hostname: api.yourdomain.com
+    service: http://localhost:3000
+  - service: http_status:404
+
+# Route your domain
+cloudflared tunnel route dns apple-music-rpc api.yourdomain.com
+
+# Run as a service
+sudo cloudflared service install
+sudo systemctl start cloudflared
+```
+
+**Drawbacks vs VPS:**
+- Your home internet going down = presence goes dark
+- ISPs sometimes block incoming connections or rotate IPs (Cloudflare Tunnel sidesteps the port-forwarding issue, but not the uptime issue)
+- If the machine restarts or sleeps, you need to ensure auto-start
+
+---
+
+### Comparison table
+
+| Option | Cost | Stable URL | Uptime | Setup complexity |
+|--------|------|-----------|--------|-----------------|
+| Replit free | Free | ✅ | ✅ (self-ping) | ⭐ Easy |
+| VPS + domain | ~€4/mo | ✅ | ✅ | ⭐⭐ Medium |
+| Docker on VPS | ~€4/mo | ✅ | ✅ | ⭐⭐ Medium |
+| Home server + Cloudflare Tunnel | Cost of hardware | ✅ (with domain) | ⚠️ Depends on ISP | ⭐⭐⭐ Complex |
+| ngrok free | Free | ❌ changes | ⚠️ | ⭐ Easy but unreliable |
+| Cloudflare quick tunnel | Free | ❌ changes | ⚠️ | ⭐ Easy but unreliable |
+| localtunnel | Free | ❌ changes | ❌ often down | ⭐ Easiest but worst |
 
 ---
 
 ## Troubleshooting
 
 ### Gateway loops with `Closed: 1006`
-Discord is rate-limiting due to too many rapid reconnects. Wait 2–3 minutes, then restart. The gateway uses exponential backoff (5 s → 10 s → 20 s → … → 5 min) to avoid this.
+Discord is rate-limiting due to too many rapid reconnects. Wait 2–3 minutes, then restart. The gateway uses exponential backoff (5 s → 10 s → 20 s → … → 5 min) to avoid this getting worse.
 
 ### `Authentication failed (4004)`
 Your Discord token was invalidated. Reset your Discord password → log back in → extract the new token → update `~/.env`.
@@ -181,14 +426,17 @@ Your Discord token was invalidated. Reset your Discord password → log back in 
 ### Album art not showing (grey circle)
 The `apple_music` asset PNG likely has a transparent background — Discord can't render it on a dark card. Re-upload with a solid red (`#FC3C44`) background.
 
-### Three lines of text showing
-The `large_text` field (tooltip on desktop, sometimes visible on mobile) was previously set to the song title. Latest version sets it to "Apple Music". Re-download `gateway.js`.
+### Third line showing under artist
+The `large_text` field was previously set to the song title. Latest version sets it to "Apple Music". Re-download `gateway.js` from the server and restart.
 
 ### Polling error / cannot reach server
-The Replit server may have gone to sleep. The self-ping every 4 min prevents this, but if it just restarted it takes ~30 s to come back up. The gateway will recover automatically on the next poll.
+The Replit server may have gone to sleep. The self-ping every 4 min prevents this, but on first start it takes ~30 s. The gateway recovers automatically on the next poll cycle.
 
 ### MacroDroid sending artist + album name
-`[not_text]` on Apple Music notifications contains `artist\nalbum` on two lines. The server strips everything after the first newline. Make sure you're using the latest server version.
+`[not_text]` on Apple Music notifications contains `artist\nalbum` on two lines. The server strips everything after the first newline. Make sure you're on the latest server version.
+
+### iTunes returns no album art
+Happens for regional songs not in the India iTunes store, or songs with special characters/emoji in the title. The server strips the explicit marker emoji (🅴) automatically. If art is still missing, the `apple_music` asset is used as fallback.
 
 ---
 
@@ -201,9 +449,3 @@ pkill -f gateway.js
 curl "https://xxxx.pike.replit.dev/api/setup/gateway.js" -o ~/gateway.js
 termux-wake-lock && node ~/gateway.js
 ```
-
----
-
-## Self-hosting (optional)
-
-A `Dockerfile` is included at the repo root for running the API server on your own VPS. You'll need a public HTTPS URL for MacroDroid to POST to. Update `REPLIT_URL` in `~/.env` accordingly.
