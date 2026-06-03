@@ -130,4 +130,16 @@ or to signal playback stopped:
 
 ## License
 
-MIT
+MIT 
+
+---
+
+##Credits
+
+This project was initiated and designed by Rohit (@irohitkun).
+
+The original goal was to create a lightweight Apple Music → Discord Rich Presence bridge for Android devices without requiring a traditional desktop RPC setup.
+
+A significant portion of the implementation was developed using AI-assisted tools. Project architecture, requirements, testing, debugging, deployment decisions, and feature direction were provided by the project author.
+
+This repository is open source to encourage experimentation, improvements, and community contributions, especially regarding timestamp synchronization and album artwork limitations.
