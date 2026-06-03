@@ -1,6 +1,7 @@
 # Apple Music → Discord Rich Presence
 
 Show what you're listening to on Apple Music as a Discord Rich Presence status — with album art, song title, artist, and a live progress timer.
+suggested to read [credits](https://github.com/irohitkun/apple-music-discord-rpc#credits) before proceeding
 
 ```
 Apple Music (phone)
@@ -136,7 +137,7 @@ MIT
 
 ## Credits
 
-This project was initiated and designed by Rohit (@irohitkun).
+This project was initiated and designed by [Rohit (@irohitkun)](https://github.com/irohitkun)
 
 The original goal was to create a lightweight Apple Music → Discord Rich Presence bridge for Android devices without requiring a traditional desktop RPC setup.
 
