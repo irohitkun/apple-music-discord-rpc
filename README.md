@@ -131,7 +131,7 @@ or to signal playback stopped:
 
 ## License
 
-MIT 
+[MIT](LICENSE)
 
 ---
 
